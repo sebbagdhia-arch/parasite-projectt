@@ -16,7 +16,7 @@ st.markdown("""
     .main { text-align: right; direction: rtl; }
     stButton>button { width: 100%; border-radius: 20px; }
     </style>
-    """, unsafe_allow_ Harris=True)
+    """, unsafe_allow_html=True)
 
 st.title("🔬 نظام التمييز الآلي للطفيليات المجهرية")
 st.write("مرحباً بك يا دكتور. هذا النظام يستخدم الذكاء الاصطناعي لتحليل عينات البراز المجهرية.")
