@@ -1,0 +1,7 @@
+0 Ascaris lumbricoides egg
+1 Giardia lamblia cyst
+2 Entamoeba histolytica
+3 Trichuris trichiura egg
+4 Hymenolepis nana egg
+5 Hookworm egg
+6 no parasite
