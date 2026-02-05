@@ -1,4 +1,3 @@
 streamlit
-tensorflow==2.15.0
+tensorflow
 pillow
-numpy==1.26.4
