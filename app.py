@@ -17,8 +17,8 @@ model_path, label_path = find_files()
 
 @st.cache_resource
 def load_my_model(m_path, l_path):
-    # استخدام compile=False لتجنب مشاكل النسخ الجديدة
-    model = tf.keras.models.load_model(m_path, compile=False)
+    # تحميل النموذج باستخدام الطريقة المتوافقة مع TF 2.15
+    model = tf.keras.models.load_model(m_path)
     with open(l_path, "r", encoding="utf-8") as f:
         class_names = [line.strip() for line in f.readlines()]
     return model, class_names
@@ -32,7 +32,7 @@ if model_path and label_path:
             image = Image.open(source).convert("RGB")
             st.image(image, caption="تم التقاط الصورة", use_container_width=True)
             
-            # معالجة الصورة
+            # معالجة الصورة بنفس طريقة Teachable Machine
             size = (224, 224)
             image = ImageOps.fit(image, size, Image.Resampling.LANCZOS)
             img_array = np.asarray(image).astype(np.float32) / 127.5 - 1
@@ -47,6 +47,6 @@ if model_path and label_path:
             st.success(f"النتيجة: {label}")
             st.info(f"نسبة التأكد: {conf*100:.2f}%")
     except Exception as e:
-        st.error(f"حدث خطأ في تحميل النموذج: {e}")
+        st.error(f"خطأ في التحميل: {e}")
 else:
-    st.warning("يرجى التأكد من رفع ملفات .h5 و .txt إلى GitHub")
+    st.warning("يرجى التأكد من رفع ملفات .h5 و .txt")
