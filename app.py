@@ -4,63 +4,60 @@ from PIL import Image, ImageOps
 import numpy as np
 import os
 
-# إعدادات واجهة المستخدم
-st.set_page_config(page_title="كاشف الطفيليات المجهري", layout="centered")
-st.title("🔬 نظام التشخيص الذكي للطفيليات")
-st.info("قم برفع صورة من المجهر أو استخدم الكاميرا مباشرة")
+# --- الحل السحري لمشكلة DepthwiseConv2D ---
+# نقوم بإنشاء نسخة معدلة من الطبقة تتجاهل كلمة 'groups'
+class PatchedDepthwiseConv2D(tf.keras.layers.DepthwiseConv2D):
+    def __init__(self, *args, **kwargs):
+        if 'groups' in kwargs:
+            kwargs.pop('groups') # حذف الكلمة المسببة للخطأ
+        super().__init__(*args, **kwargs)
 
-# دالة البحث عن الملفات
-def get_files():
+# إعداد الواجهة
+st.set_page_config(page_title="كاشف الطفيليات المجهري", layout="centered")
+st.title("🔬 مختبر التشخيص الذكي")
+
+def find_files():
     m = next((f for f in os.listdir() if f.endswith(".h5")), None)
     l = next((f for f in os.listdir() if f.endswith(".txt") and "req" not in f), None)
     return m, l
 
-model_file, label_file = get_files()
+model_path, label_path = find_files()
 
 @st.cache_resource
 def load_model_safely(m_path, l_path):
-    # تحميل النموذج مع إيقاف الترجمة لتجنب مشاكل التوافق
-    model = tf.keras.models.load_model(m_path, compile=False)
+    # إخبار Keras باستخدام الطبقة المعدلة بدلاً من الأصلية
+    custom_objects = {'DepthwiseConv2D': PatchedDepthwiseConv2D}
+    model = tf.keras.models.load_model(m_path, custom_objects=custom_objects, compile=False)
     
-    # حل مشكلة "2 input tensors": إذا كان النموذج مغلفاً، نأخذ الطبقة الداخلية
-    if hasattr(model, 'layers') and len(model.layers) > 0:
-        if isinstance(model.layers[0], tf.keras.Model):
-            model = model.layers[0]
-
     with open(l_path, "r", encoding="utf-8") as f:
         labels = [line.strip() for line in f.readlines()]
     return model, labels
 
-if model_file and label_file:
+if model_path and label_path:
     try:
-        model, class_names = load_model_safely(model_file, label_file)
+        model, class_names = load_model_safely(model_path, label_path)
         
-        img_file = st.camera_input("التقط صورة العينة")
-        if not img_file:
-            img_file = st.file_uploader("أو ارفع صورة من الجهاز", type=['jpg', 'png', 'jpeg'])
-
-        if img_file:
-            image = Image.open(img_file).convert("RGB")
-            st.image(image, caption="المعينة المختارة", use_container_width=True)
+        source = st.camera_input("التقط صورة من المجهر")
+        if source:
+            image = Image.open(source).convert("RGB")
+            st.image(image, caption="العينة الملتقطة", use_container_width=True)
             
-            # معالجة الصورة
+            # المعالجة (نفس مقاييس Teachable Machine)
             size = (224, 224)
             image = ImageOps.fit(image, size, Image.Resampling.LANCZOS)
             img_array = np.asarray(image).astype(np.float32) / 127.5 - 1
             data = np.expand_dims(img_array, axis=0)
             
-            # التوقع باستخدام الطريقة المباشرة لتجنب أخطاء Keras 3
-            prediction = model(data, training=False).numpy()
+            # التوقع
+            prediction = model.predict(data)
             index = np.argmax(prediction)
-            percent = prediction[0][index] * 100
             
-            # عرض النتيجة بوضوح
-            st.success(f"النتيجة المتوقعة: {class_names[index]}")
-            st.progress(int(percent))
-            st.write(f"نسبة الثقة: {percent:.2f}%")
-
+            # عرض النتيجة
+            st.balloons()
+            st.success(f"النتيجة: {class_names[index]}")
+            st.write(f"نسبة التأكد: {prediction[0][index]*100:.2f}%")
+            
     except Exception as e:
-        st.error(f"حدث خطأ فني: {e}")
-        st.warning("تأكد من أنك رفعت ملف keras_model.h5 الأصلي وليس ملفاً مضغوطاً.")
+        st.error(f"فشل تحميل النموذج: {e}")
 else:
-    st.error("لم يتم العثور على ملفات النموذج (.h5) أو الأسماء (.txt) في GitHub.")
+    st.warning("يرجى التأكد من وجود ملفات .h5 و .txt في حسابك على GitHub")
