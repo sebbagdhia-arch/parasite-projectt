@@ -4,48 +4,63 @@ from PIL import Image, ImageOps
 import numpy as np
 import os
 
-st.set_page_config(page_title="كاشف الطفيليات", layout="centered")
-st.title("🔬 نظام التمييز الآلي للطفيليات")
+# إعدادات واجهة المستخدم
+st.set_page_config(page_title="كاشف الطفيليات المجهري", layout="centered")
+st.title("🔬 نظام التشخيص الذكي للطفيليات")
+st.info("قم برفع صورة من المجهر أو استخدم الكاميرا مباشرة")
 
-# البحث عن الملفات
-def find_files():
-    m_file = next((f for f in os.listdir() if f.endswith(".h5")), None)
-    l_file = next((f for f in os.listdir() if f.endswith(".txt") and f != "requirements.txt"), None)
-    return m_file, l_file
+# دالة البحث عن الملفات
+def get_files():
+    m = next((f for f in os.listdir() if f.endswith(".h5")), None)
+    l = next((f for f in os.listdir() if f.endswith(".txt") and "req" not in f), None)
+    return m, l
 
-model_path, label_path = find_files()
+model_file, label_file = get_files()
 
 @st.cache_resource
-def load_my_model(m_path, l_path):
-    # تحميل النموذج بالطريقة القياسية لنسخة 2.15
+def load_model_safely(m_path, l_path):
+    # تحميل النموذج مع إيقاف الترجمة لتجنب مشاكل التوافق
     model = tf.keras.models.load_model(m_path, compile=False)
-    with open(l_path, "r", encoding="utf-8") as f:
-        class_names = [line.strip() for line in f.readlines()]
-    return model, class_names
+    
+    # حل مشكلة "2 input tensors": إذا كان النموذج مغلفاً، نأخذ الطبقة الداخلية
+    if hasattr(model, 'layers') and len(model.layers) > 0:
+        if isinstance(model.layers[0], tf.keras.Model):
+            model = model.layers[0]
 
-if model_path and label_path:
+    with open(l_path, "r", encoding="utf-8") as f:
+        labels = [line.strip() for line in f.readlines()]
+    return model, labels
+
+if model_file and label_file:
     try:
-        model, class_names = load_my_model(model_path, label_path)
-        source = st.camera_input("صوّر العينة")
+        model, class_names = load_model_safely(model_file, label_file)
         
-        if source:
-            image = Image.open(source).convert("RGB")
-            st.image(image, caption="تم التقاط الصورة", use_container_width=True)
+        img_file = st.camera_input("التقط صورة العينة")
+        if not img_file:
+            img_file = st.file_uploader("أو ارفع صورة من الجهاز", type=['jpg', 'png', 'jpeg'])
+
+        if img_file:
+            image = Image.open(img_file).convert("RGB")
+            st.image(image, caption="المعينة المختارة", use_container_width=True)
             
-            # معالجة الصورة (نفس إعدادات Teachable Machine)
+            # معالجة الصورة
             size = (224, 224)
             image = ImageOps.fit(image, size, Image.Resampling.LANCZOS)
             img_array = np.asarray(image).astype(np.float32) / 127.5 - 1
             data = np.expand_dims(img_array, axis=0)
             
-            # التوقع (في نسخة 2.15 سيعمل بدون خطأ الـ 2 tensors)
-            prediction = model.predict(data)
+            # التوقع باستخدام الطريقة المباشرة لتجنب أخطاء Keras 3
+            prediction = model(data, training=False).numpy()
             index = np.argmax(prediction)
+            percent = prediction[0][index] * 100
             
-            st.success(f"النتيجة: {class_names[index]}")
-            st.info(f"نسبة التأكد: {prediction[0][index]*100:.2f}%")
-            
+            # عرض النتيجة بوضوح
+            st.success(f"النتيجة المتوقعة: {class_names[index]}")
+            st.progress(int(percent))
+            st.write(f"نسبة الثقة: {percent:.2f}%")
+
     except Exception as e:
-        st.error(f"خطأ: {e}")
+        st.error(f"حدث خطأ فني: {e}")
+        st.warning("تأكد من أنك رفعت ملف keras_model.h5 الأصلي وليس ملفاً مضغوطاً.")
 else:
-    st.warning("يرجى رفع ملفات .h5 و .txt")
+    st.error("لم يتم العثور على ملفات النموذج (.h5) أو الأسماء (.txt) في GitHub.")
