@@ -3,75 +3,71 @@ import tensorflow as tf
 from PIL import Image, ImageOps
 import numpy as np
 import os
-import keras
 
-# 1. إصلاح الطبقات القديمة (DepthwiseConv2D)
+# --- حل مشكلة التوافق مع الطبقات القديمة ---
+import keras
 class PatchedDepthwiseConv2D(tf.keras.layers.DepthwiseConv2D):
     def __init__(self, *args, **kwargs):
         kwargs.pop('groups', None)
         super().__init__(*args, **kwargs)
 
+# --- إعدادات الواجهة ---
 st.set_page_config(page_title="كاشف الطفيليات المجهري", layout="centered")
-st.title("🔬 نظام التشخيص الآلي (الإصدار المصحح)")
+st.title("🔬 نظام التشخيص الذكي للطفيليات")
+st.write("---")
 
-def find_files():
-    m = next((f for f in os.listdir() if f.endswith(".h5")), None)
-    l = next((f for f in os.listdir() if f.endswith(".txt") and "req" not in f), None)
-    return m, l
-
-model_path, label_path = find_files()
-
+# --- دالة البحث عن الملفات وتحميلها ---
 @st.cache_resource
-def load_and_fix_model(m_path, l_path):
-    custom_objects = {'DepthwiseConv2D': PatchedDepthwiseConv2D}
-    # تحميل النموذج الأساسي
-    base_model = tf.keras.models.load_model(m_path, custom_objects=custom_objects, compile=False)
+def load_everything():
+    # البحث عن ملف النموذج وملف الأسماء
+    model_path = next((f for f in os.listdir() if f.endswith(".h5")), None)
+    label_path = next((f for f in os.listdir() if f.endswith(".txt") and "req" not in f.lower()), None)
     
-    # --- العملية الجراحية ---
-    # إذا كان النموذج عبارة عن "غلاف" (Sequential)، سنخترقه للوصول للمحرك الداخلي
-    if hasattr(base_model, 'layers'):
-        for layer in base_model.layers:
-            if "functional" in layer.name.lower() or isinstance(layer, tf.keras.Model):
-                final_model = layer
-                break
-        else:
-            final_model = base_model
-    else:
-        final_model = base_model
-        
-    with open(l_path, "r", encoding="utf-8") as f:
-        labels = [line.strip() for line in f.readlines()]
-    return final_model, labels
+    if not model_path or not label_path:
+        return None, None
+    
+    # تحميل النموذج مع الحلول التقنية
+    custom_objects = {'DepthwiseConv2D': PatchedDepthwiseConv2D}
+    model = tf.keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
+    
+    # قراءة الأسماء وتنظيفها
+    with open(label_path, "r", encoding="utf-8") as f:
+        class_names = [line.strip() for line in f.readlines()]
+    
+    return model, class_names
 
-if model_path and label_path:
-    try:
-        model, class_names = load_and_fix_model(model_path, label_path)
+# تشغيل التحميل
+model, class_names = load_everything()
+
+if model and class_names:
+    # واجهة الكاميرا
+    img_file = st.camera_input("وجه المجهر نحو الكاميرا والتقط الصورة")
+    
+    if img_file:
+        image = Image.open(img_file).convert("RGB")
+        st.image(image, caption="الصورة الملتقطة", use_container_width=True)
         
-        source = st.camera_input("صوّر العينة من المجهر")
-        if source:
-            image = Image.open(source).convert("RGB")
-            st.image(image, caption="الصورة الحالية", use_container_width=True)
-            
-            # معالجة الصورة
-            size = (224, 224)
-            image = ImageOps.fit(image, size, Image.Resampling.LANCZOS)
-            img_array = np.asarray(image).astype(np.float32) / 127.5 - 1
-            data = np.expand_dims(img_array, axis=0)
-            
-            # --- التوقع المباشر (تجاهل القناع تماماً) ---
-            # نستخدم استدعاء الطبقة مباشرة بدون predict() لتجنب إرسال mask
-            prediction = model(tf.constant(data), training=False)
-            if hasattr(prediction, "numpy"):
-                prediction = prediction.numpy()
-            
+        # تجهيز الصورة للمعالجة
+        size = (224, 224)
+        image = ImageOps.fit(image, size, Image.Resampling.LANCZOS)
+        img_array = np.asarray(image).astype(np.float32) / 127.5 - 1
+        data = np.expand_dims(img_array, axis=0)
+        
+        # التوقع (استخدام استدعاء مباشر لتجنب أخطاء Tensors)
+        with st.spinner('جاري التحليل...'):
+            prediction = model(tf.constant(data), training=False).numpy()
             index = np.argmax(prediction)
-            confidence = prediction[0][index] * 100
+            label = class_names[index]
+            confidence = prediction[0][index]
             
-            st.balloons()
-            st.success(f"النتيجة: {class_names[index]}")
-            st.metric("دقة التشخيص", f"{confidence:.2f}%")
+            # تنظيف الاسم من الأرقام (مثلاً "0 Parasite" تصبح "Parasite")
+            clean_label = label.split(" ", 1)[1] if " " in label else label
             
-    except Exception as e:
-        st.error(f"خطأ في معالجة النموذج: {e}")
+            # عرض النتائج
+            st.success(f"النتيجة: **{clean_label}**")
+            st.progress(float(confidence))
+            st.write(f"نسبة التأكد: {confidence*100:.2f}%")
+            if confidence > 0.8:
+                st.balloons()
 else:
-    st.warning("يرجى التأكد من وجود ملفات .h5 و .txt")
+    st.warning("⚠️ يرجى التأكد من رفع ملفات .h5 و .txt بشكل صحيح إلى المستودع.")
